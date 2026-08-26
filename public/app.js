@@ -4,9 +4,10 @@
   const TIERS = { VIEWER:1, GRADER:2, ADMIN:3 };
   const TIER_LABEL = { 1:'Viewer', 2:'Instructor', 3:'Admin' };
   const MAX_FILE_BYTES = 5 * 1024 * 1024;
-  const ICON_FOR_TAB = { curriculum:'bookOpen', grade:'clipboardCheck', survey:'messageSquare', analytics:'barChart3', feedback:'inbox', access:'shield' };
+  const ICON_FOR_TAB = { curriculum:'bookOpen', master:'file', grade:'clipboardCheck', survey:'messageSquare', analytics:'barChart3', feedback:'inbox', access:'shield' };
   const TAB_DEFS = [
     { key:'curriculum', label:'Curriculum', minTier:1 },
+    { key:'master', label:'Master Document', minTier:1 },
     { key:'grade', label:'Grade Work', minTier:2 },
     { key:'survey', label:'Survey', minTier:2 },
     { key:'analytics', label:'Analytics', minTier:3 },
@@ -31,7 +32,8 @@
     plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
     paperclip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5 12.5 20a4.5 4.5 0 0 1-6.4-6.4l8-8a3 3 0 0 1 4.3 4.3l-7.8 7.8a1.5 1.5 0 0 1-2.1-2.1L15.5 8"/></svg>',
     x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
-    externalLink:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>'
+    externalLink:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>',
+    file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></svg>'
   };
 
   // ---------------- state ----------------
@@ -51,6 +53,8 @@
   let surveyAuthorFilter = 'All';
   let pendingUnitFile = null;
   let pendingSubFile = null;
+  let masterDoc = null;
+  let masterDocLoaded = false;
 
   // ---------------- helpers ----------------
   function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -253,12 +257,14 @@
     const el = document.getElementById(which+'-view');
     if(!el) return;
     if(which==='curriculum'){ el.innerHTML = renderCurriculum(); wireCurriculum(); }
+    if(which==='master'){ await ensureMaster(); el.innerHTML = renderMasterDoc(); wireMasterDoc(); }
     if(which==='grade'){ await ensureSubmissions(); el.innerHTML = renderGradeWork(); wireGradeWork(); }
     if(which==='survey'){ el.innerHTML = renderSurvey(); wireSurvey(); }
     if(which==='analytics'){ await ensureAnalytics(); el.innerHTML = renderAnalytics(); wireAnalytics(); }
     if(which==='feedback'){ await ensureSurveys(); el.innerHTML = renderFeedback(); wireFeedback(); }
     if(which==='access'){ await ensureRoster(); el.innerHTML = renderAccess(); wireAccess(); }
   }
+  async function ensureMaster(){ const r = await apiJSON('GET','/api/master'); masterDoc = r.document; masterDocLoaded = true; }
   async function ensureSubmissions(){ const r = await apiJSON('GET','/api/submissions'); D.submissions = r.submissions; }
   async function ensureAnalytics(){ const r = await apiJSON('GET','/api/analytics'); D.submissions = r.submissions; D.curriculum = D.curriculum.length ? D.curriculum : r.units; }
   async function ensureSurveys(){ const r = await apiJSON('GET','/api/surveys'); D.surveys = r.surveys.map(s => ({ id:s.id, author:s.author, date:s.survey_date, wentWell:s.went_well, didntGoWell:s.didnt_go_well, feedback:s.feedback })); }
@@ -492,6 +498,67 @@
       const cancel = document.getElementById('unit-form-cancel');
       if(cancel) cancel.addEventListener('click', () => { editingUnitId = null; showNewUnitForm = false; pendingUnitFile = null; rerender('curriculum'); });
     }
+  }
+
+  // ---------------- Master Document ----------------
+  function fmtDateTime(iso){
+    if(!iso) return '';
+    return new Date(iso).toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+  }
+  function renderMasterDoc(){
+    const isAdmin = user.tier >= TIERS.ADMIN;
+    return `
+      <div class="card-header" style="background:none;border:none;padding:0 0 14px;">
+        <h2>Curriculum master document</h2>
+        <span class="small muted">The single source of truth — everyone with access can view or download it</span>
+      </div>
+      <div class="card card-pad" style="max-width:640px;">
+        ${masterDoc ? `
+          <div class="attachment-row" style="margin-bottom:10px;">${attachmentChipSaved({ id: masterDoc.id, name: masterDoc.filename })}</div>
+          <p class="small muted">Uploaded by ${esc(masterDoc.uploadedBy || 'Unknown')} · ${fmtDateTime(masterDoc.uploadedAt)}</p>
+        ` : `<p class="muted">No master document has been uploaded yet.</p>`}
+        ${isAdmin ? `
+          <form id="master-form" style="margin-top:${masterDoc?'20px':'6px'};">
+            <div class="field">
+              <label>${masterDoc ? 'Upload a new version (replaces the current file)' : 'Upload the master document'}</label>
+              <div class="file-drop"><input type="file" id="mf-file" required></div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:6px;">
+              <button type="submit" class="btn btn-secondary btn-md">${masterDoc ? 'Upload new version' : 'Upload'}</button>
+              ${masterDoc ? `<button type="button" class="btn btn-outline btn-md" id="master-remove-btn">Remove</button>` : ''}
+            </div>
+          </form>
+        ` : ''}
+      </div>
+    `;
+  }
+  function wireMasterDoc(){
+    const form = document.getElementById('master-form');
+    if(form) form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const fileInput = document.getElementById('mf-file');
+      const file = fileInput.files[0];
+      if(!file){ toast('Choose a file first.'); return; }
+      if(file.size > MAX_FILE_BYTES){ toast('That file is larger than 5 MB.'); return; }
+      const fd = new FormData();
+      fd.append('file', file);
+      try{
+        const { document: doc } = await apiForm('POST', '/api/master', fd);
+        masterDoc = doc;
+        toast('Master document updated.');
+        rerender('master');
+      }catch(err){ errorToast(err, "Couldn't upload that file."); }
+    });
+    const removeBtn = document.getElementById('master-remove-btn');
+    if(removeBtn) removeBtn.addEventListener('click', async () => {
+      if(!confirm('Remove the master document? This can\'t be undone.')) return;
+      try{
+        await apiJSON('DELETE', '/api/master');
+        masterDoc = null;
+        toast('Master document removed.');
+        rerender('master');
+      }catch(err){ errorToast(err); }
+    });
   }
 
   // ---------------- Grade Work ----------------

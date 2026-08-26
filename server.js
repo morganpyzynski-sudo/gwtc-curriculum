@@ -244,6 +244,41 @@ app.get('/api/attachments/:id', requireAuth, async (req, res) => {
   res.send(a.data);
 });
 
+// ================= CURRICULUM MASTER DOCUMENT =================
+// A single, always-current file (owner_type='master'). Uploading a new one replaces the old one.
+const MASTER_OWNER_ID = 0;
+function rowMaster(a) {
+  if (!a) return null;
+  return {
+    id: a.id, filename: a.filename, contentType: a.content_type, size: a.size,
+    uploadedBy: a.uploaded_by || null, uploadedAt: a.created_at
+  };
+}
+app.get('/api/master', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, filename, content_type, size, uploaded_by, created_at FROM attachments
+     WHERE owner_type='master' AND owner_id=$1 ORDER BY created_at DESC LIMIT 1`,
+    [MASTER_OWNER_ID]
+  );
+  res.json({ document: rowMaster(rows[0]) });
+});
+
+app.post('/api/master', requireTier(TIER.ADMIN), upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'file_required' });
+  await pool.query(`DELETE FROM attachments WHERE owner_type='master' AND owner_id=$1`, [MASTER_OWNER_ID]);
+  const { rows } = await pool.query(
+    `INSERT INTO attachments (owner_type, owner_id, filename, content_type, size, data, uploaded_by)
+     VALUES ('master',$1,$2,$3,$4,$5,$6) RETURNING id, filename, content_type, size, uploaded_by, created_at`,
+    [MASTER_OWNER_ID, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, req.user.name]
+  );
+  res.json({ document: rowMaster(rows[0]) });
+});
+
+app.delete('/api/master', requireTier(TIER.ADMIN), async (req, res) => {
+  await pool.query(`DELETE FROM attachments WHERE owner_type='master' AND owner_id=$1`, [MASTER_OWNER_ID]);
+  res.json({ ok: true });
+});
+
 // ================= COHORTS =================
 app.get('/api/cohorts', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM cohorts ORDER BY id');
@@ -390,6 +425,13 @@ async function migrateAndSeed() {
     ALTER TABLE curriculum_units DROP COLUMN IF EXISTS weeks;
   `);
   console.log('[migrate] curriculum_units: grade optional, duration in hours/minutes.');
+
+  await pool.query(`
+    ALTER TABLE attachments ADD COLUMN IF NOT EXISTS uploaded_by TEXT;
+    ALTER TABLE attachments DROP CONSTRAINT IF EXISTS attachments_owner_type_check;
+    ALTER TABLE attachments ADD CONSTRAINT attachments_owner_type_check CHECK (owner_type IN ('unit','submission','master'));
+  `);
+  console.log('[migrate] attachments: master document type allowed.');
 
   const { rows: userCount } = await pool.query('SELECT count(*)::int AS n FROM users');
   if (userCount[0].n === 0) {

@@ -37,15 +37,16 @@ CREATE TABLE IF NOT EXISTS curriculum_units (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- owner_type: 'unit' | 'submission'
+-- owner_type: 'unit' | 'submission' | 'master' (the single curriculum master document)
 CREATE TABLE IF NOT EXISTS attachments (
   id SERIAL PRIMARY KEY,
-  owner_type TEXT NOT NULL CHECK (owner_type IN ('unit','submission')),
+  owner_type TEXT NOT NULL CHECK (owner_type IN ('unit','submission','master')),
   owner_id INT NOT NULL,
   filename TEXT NOT NULL,
   content_type TEXT DEFAULT 'application/octet-stream',
   size INT NOT NULL,
   data BYTEA NOT NULL,
+  uploaded_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_type, owner_id);
