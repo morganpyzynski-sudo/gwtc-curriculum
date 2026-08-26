@@ -105,7 +105,7 @@
   function restoreFormRaw(vals){
     Object.keys(vals).forEach(id => { const el = document.getElementById(id); if(el) el.value = vals[id]; });
   }
-  const UNIT_FORM_FIELD_IDS = ['uf-subject','uf-grade','uf-title','uf-standard','uf-weeks','uf-summary','uf-tags','uf-assignment','uf-moodle','uf-doc'];
+  const UNIT_FORM_FIELD_IDS = ['uf-subject','uf-grade','uf-title','uf-standard','uf-duration-hours','uf-duration-minutes','uf-summary','uf-tags','uf-assignment','uf-moodle','uf-doc'];
   const GRADE_FORM_FIELD_IDS = ['gw-student','gw-unit','gw-cohort','gw-assignment','gw-text','gw-moodle'];
 
   function toast(msg){
@@ -277,20 +277,36 @@
   }
 
   // ---------------- Curriculum ----------------
+  function formatDuration(u){
+    const h = u.durationHours || 0, m = u.durationMinutes || 0;
+    if(!h && !m) return null;
+    const parts = [];
+    if(h) parts.push(`${h} hr`);
+    if(m) parts.push(`${m} min`);
+    return parts.join(' ');
+  }
   function unitFormHTML(unit){
-    const u = unit || { subject:'', grade:6, title:'', standard:'', weeks:3, summary:'', tags:[], assignment:'', doc:'', moodleUrl:'', attachments:[] };
+    const u = unit || { subject:'', grade:null, title:'', standard:'', durationHours:0, durationMinutes:0, summary:'', tags:[], assignment:'', doc:'', moodleUrl:'', attachments:[] };
     const isEdit = !!unit;
     return `
       <form id="unit-form" class="card card-pad" style="margin-bottom:16px;">
         <h3 style="margin-bottom:14px;">${isEdit?'Edit unit':'New curriculum unit'}</h3>
         <div class="field-row">
           <div class="field"><label>Subject</label><input id="uf-subject" value="${esc(u.subject)}" required></div>
-          <div class="field"><label>Grade / level</label><input id="uf-grade" type="number" min="0" max="20" value="${u.grade}" required></div>
+          <div class="field"><label>Grade / level (optional)</label><input id="uf-grade" type="number" min="0" max="20" value="${u.grade ?? ''}" placeholder="e.g. 6"></div>
         </div>
         <div class="field"><label>Unit title</label><input id="uf-title" value="${esc(u.title)}" required></div>
         <div class="field-row">
           <div class="field"><label>Standard / cert code</label><input id="uf-standard" value="${esc(u.standard)}"></div>
-          <div class="field"><label>Duration (weeks)</label><input id="uf-weeks" type="number" min="1" max="20" value="${u.weeks}"></div>
+          <div class="field">
+            <label>Duration</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input id="uf-duration-hours" type="number" min="0" max="999" value="${u.durationHours || 0}" style="width:88px;" aria-label="Hours">
+              <span class="small muted">hr</span>
+              <input id="uf-duration-minutes" type="number" min="0" max="59" value="${u.durationMinutes || 0}" style="width:88px;" aria-label="Minutes">
+              <span class="small muted">min</span>
+            </div>
+          </div>
         </div>
         <div class="field"><label>Summary</label><textarea id="uf-summary" required>${esc(u.summary)}</textarea></div>
         <div class="field"><label>Keywords (comma-separated — used by the grading heuristic)</label><input id="uf-tags" value="${esc((u.tags||[]).join(', '))}"></div>
@@ -346,10 +362,10 @@
             ${editingUnitId===u.id ? unitFormHTML(u) : `
             <div class="tags" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <span class="subject-tag" style="background:${st.bg};border-color:${st.bd};color:var(--text-heading);">${esc(u.subject)}</span>
-              <span class="tag" style="padding:2px 8px;">Level ${u.grade}</span>
+              ${(u.grade !== null && u.grade !== undefined) ? `<span class="tag" style="padding:2px 8px;">Level ${u.grade}</span>` : ''}
             </div>
             <h3>${esc(u.title)}</h3>
-            <div class="standard">${esc(u.standard)} · ${u.weeks} wk</div>
+            <div class="standard">${[esc(u.standard), formatDuration(u)].filter(Boolean).join(' · ')}</div>
             <div class="summary">${esc(u.summary)}</div>
             ${expandedDocId===u.id ? `<div class="doc-box">${esc(u.doc||'No document on file yet.')}</div>` : ''}
             ${(u.attachments&&u.attachments.length) ? `<div class="attachment-row">${u.attachments.map(a=>attachmentChipSaved(a)).join('')}</div>` : ''}
@@ -374,7 +390,8 @@
     fd.append('grade', document.getElementById('uf-grade').value);
     fd.append('title', document.getElementById('uf-title').value.trim());
     fd.append('standard', document.getElementById('uf-standard').value.trim());
-    fd.append('weeks', document.getElementById('uf-weeks').value);
+    fd.append('durationHours', document.getElementById('uf-duration-hours').value || '0');
+    fd.append('durationMinutes', document.getElementById('uf-duration-minutes').value || '0');
     fd.append('summary', document.getElementById('uf-summary').value.trim());
     fd.append('tags', document.getElementById('uf-tags').value);
     fd.append('assignment', document.getElementById('uf-assignment').value.trim());
@@ -515,7 +532,7 @@
             <div class="field"><label for="gw-student">Student name</label><input id="gw-student" type="text" placeholder="e.g. Jordan Kim" required></div>
             <div class="field-row">
               <div class="field"><label for="gw-unit">Unit</label>
-                <select id="gw-unit" required><option value="" disabled selected>Choose a unit…</option>${units.map(u => `<option value="${u.id}">${esc(u.subject)} · Level ${u.grade} — ${esc(u.title)}</option>`).join('')}</select>
+                <select id="gw-unit" required><option value="" disabled selected>Choose a unit…</option>${units.map(u => `<option value="${u.id}">${esc(u.subject)}${(u.grade!==null&&u.grade!==undefined)?' · Level '+u.grade:''} — ${esc(u.title)}</option>`).join('')}</select>
               </div>
               <div class="field"><label for="gw-cohort">Cohort</label>
                 <select id="gw-cohort" required><option value="" disabled selected>Choose a cohort…</option>${D.cohorts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>

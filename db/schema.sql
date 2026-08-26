@@ -23,10 +23,11 @@ CREATE TABLE IF NOT EXISTS cohorts (
 CREATE TABLE IF NOT EXISTS curriculum_units (
   id SERIAL PRIMARY KEY,
   subject TEXT NOT NULL,
-  grade INT NOT NULL DEFAULT 0,
+  grade INT,
   title TEXT NOT NULL,
   standard TEXT DEFAULT '',
-  weeks INT DEFAULT 1,
+  duration_hours INT DEFAULT 0,
+  duration_minutes INT DEFAULT 0,
   summary TEXT DEFAULT '',
   tags TEXT[] NOT NULL DEFAULT '{}',
   assignment TEXT DEFAULT '',

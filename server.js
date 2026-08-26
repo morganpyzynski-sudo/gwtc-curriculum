@@ -67,10 +67,16 @@ const TIER = { VIEWER: 1, GRADER: 2, ADMIN: 3 };
 
 function rowUnit(r, attachments) {
   return {
-    id: r.id, subject: r.subject, grade: r.grade, title: r.title, standard: r.standard,
-    weeks: r.weeks, summary: r.summary, tags: r.tags || [], assignment: r.assignment,
+    id: r.id, subject: r.subject, grade: (r.grade === null || r.grade === undefined) ? null : r.grade, title: r.title, standard: r.standard,
+    durationHours: r.duration_hours || 0, durationMinutes: r.duration_minutes || 0,
+    summary: r.summary, tags: r.tags || [], assignment: r.assignment,
     doc: r.doc, moodleUrl: r.moodle_url, attachments: attachments || []
   };
+}
+function parseGrade(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
 }
 function rowSubmission(r, attachment) {
   const overridden = r.override_pct !== null && r.override_pct !== undefined;
@@ -181,10 +187,10 @@ app.post('/api/curriculum', requireTier(TIER.ADMIN), upload.single('file'), asyn
   const b = req.body || {};
   const tags = (b.tags || '').split(',').map(s => s.trim()).filter(Boolean);
   const { rows } = await pool.query(
-    `INSERT INTO curriculum_units (subject, grade, title, standard, weeks, summary, tags, assignment, doc, moodle_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [b.subject || 'General', parseInt(b.grade, 10) || 6, b.title || 'Untitled unit', b.standard || '',
-     parseInt(b.weeks, 10) || 1, b.summary || '', tags, b.assignment || '', b.doc || '', b.moodleUrl || '']
+    `INSERT INTO curriculum_units (subject, grade, title, standard, duration_hours, duration_minutes, summary, tags, assignment, doc, moodle_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [b.subject || 'General', parseGrade(b.grade), b.title || 'Untitled unit', b.standard || '',
+     parseInt(b.durationHours, 10) || 0, parseInt(b.durationMinutes, 10) || 0, b.summary || '', tags, b.assignment || '', b.doc || '', b.moodleUrl || '']
   );
   const unit = rows[0];
   if (req.file) {
@@ -201,10 +207,10 @@ app.put('/api/curriculum/:id', requireTier(TIER.ADMIN), upload.single('file'), a
   const b = req.body || {};
   const tags = (b.tags || '').split(',').map(s => s.trim()).filter(Boolean);
   const { rows } = await pool.query(
-    `UPDATE curriculum_units SET subject=$1, grade=$2, title=$3, standard=$4, weeks=$5, summary=$6,
-     tags=$7, assignment=$8, doc=$9, moodle_url=$10, updated_at=now() WHERE id=$11 RETURNING *`,
-    [b.subject || 'General', parseInt(b.grade, 10) || 6, b.title || 'Untitled unit', b.standard || '',
-     parseInt(b.weeks, 10) || 1, b.summary || '', tags, b.assignment || '', b.doc || '', b.moodleUrl || '', id]
+    `UPDATE curriculum_units SET subject=$1, grade=$2, title=$3, standard=$4, duration_hours=$5, duration_minutes=$6, summary=$7,
+     tags=$8, assignment=$9, doc=$10, moodle_url=$11, updated_at=now() WHERE id=$12 RETURNING *`,
+    [b.subject || 'General', parseGrade(b.grade), b.title || 'Untitled unit', b.standard || '',
+     parseInt(b.durationHours, 10) || 0, parseInt(b.durationMinutes, 10) || 0, b.summary || '', tags, b.assignment || '', b.doc || '', b.moodleUrl || '', id]
   );
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
   if (req.file) {
@@ -373,6 +379,17 @@ async function migrateAndSeed() {
   const schemaSql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
   await pool.query(schemaSql);
   console.log('[migrate] schema ensured.');
+
+  // Poor-man's incremental migration for databases created before a schema change.
+  // Each statement is written to be safe to re-run on every boot.
+  await pool.query(`
+    ALTER TABLE curriculum_units ALTER COLUMN grade DROP NOT NULL;
+    ALTER TABLE curriculum_units ALTER COLUMN grade DROP DEFAULT;
+    ALTER TABLE curriculum_units ADD COLUMN IF NOT EXISTS duration_hours INT DEFAULT 0;
+    ALTER TABLE curriculum_units ADD COLUMN IF NOT EXISTS duration_minutes INT DEFAULT 0;
+    ALTER TABLE curriculum_units DROP COLUMN IF EXISTS weeks;
+  `);
+  console.log('[migrate] curriculum_units: grade optional, duration in hours/minutes.');
 
   const { rows: userCount } = await pool.query('SELECT count(*)::int AS n FROM users');
   if (userCount[0].n === 0) {
