@@ -55,6 +55,7 @@
   let pendingSubFile = null;
   let masterDoc = null;
   let masterDocLoaded = false;
+  let showMasterUpload = false;
 
   // ---------------- helpers ----------------
   function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -223,7 +224,7 @@
           </header>
           <main class="scroll"><div class="content-max">
             ${tabs.map(t => `<div class="view" id="${t.key}-view" style="display:none;"></div>`).join('')}
-            <div class="footnote">${ICONS.checkCircle}<span>This is the real, deployed version — curriculum, grades, surveys, and access changes are saved to a live database, not just this screen.</span></div>
+            <div class="footnote" id="app-footnote">${ICONS.checkCircle}<span>This is the real, deployed version — curriculum, grades, surveys, and access changes are saved to a live database, not just this screen.</span></div>
           </div></main>
         </div>
       </div>
@@ -279,6 +280,8 @@
     const titleEl = document.getElementById('page-title');
     if(titleEl && activeDef) titleEl.textContent = activeDef.label;
     if(activeTab){ const el = document.getElementById(activeTab+'-view'); if(el) el.style.display = 'block'; }
+    const footnoteEl = document.getElementById('app-footnote');
+    if(footnoteEl) footnoteEl.style.display = (activeTab === 'master') ? 'none' : 'flex';
     for(const t of tabs) await rerender(t.key);
   }
 
@@ -505,34 +508,76 @@
     if(!iso) return '';
     return new Date(iso).toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
   }
+  function masterUploadFormHTML(isReplace){
+    return `
+      <form id="master-form">
+        <div class="field">
+          <label>${isReplace ? 'Upload a new version (replaces the current file)' : 'Upload the master document'}</label>
+          <div class="file-drop"><input type="file" id="mf-file" required></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:6px;">
+          <button type="submit" class="btn btn-secondary btn-md">${isReplace ? 'Upload new version' : 'Upload'}</button>
+          ${isReplace ? `<button type="button" class="btn btn-outline btn-md" id="master-remove-btn">Remove</button>` : ''}
+        </div>
+      </form>
+    `;
+  }
+  function isInlineViewable(type){
+    return /^image\//.test(type||'') || type==='application/pdf' || type==='text/plain';
+  }
+  function masterViewerHTML(doc){
+    const type = doc.contentType || '';
+    const src = `/api/attachments/${doc.id}?inline=1`;
+    if(/^image\//.test(type)){
+      return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;background:var(--surface-page);"><img src="${src}" alt="${esc(doc.filename)}" style="max-width:100%;max-height:100%;object-fit:contain;"></div>`;
+    }
+    if(type === 'application/pdf' || type === 'text/plain'){
+      return `<iframe src="${src}" title="${esc(doc.filename)}" style="width:100%;height:100%;border:none;"></iframe>`;
+    }
+    return `<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:40px;">
+      <p class="muted">Preview isn't available for this file type in the browser.</p>
+      <a class="btn btn-secondary btn-md" href="/api/attachments/${doc.id}" target="_blank" rel="noopener">Download to view</a>
+    </div>`;
+  }
   function renderMasterDoc(){
     const isAdmin = user.tier >= TIERS.ADMIN;
+    if(!masterDoc){
+      return `
+        <div class="card-header" style="background:none;border:none;padding:0 0 14px;">
+          <h2>Curriculum master document</h2>
+          <span class="small muted">The single source of truth — everyone with access can view it here</span>
+        </div>
+        <div class="card card-pad" style="max-width:640px;">
+          <p class="muted">No master document has been uploaded yet.</p>
+          ${isAdmin ? masterUploadFormHTML(false) : ''}
+        </div>
+      `;
+    }
+    const viewable = isInlineViewable(masterDoc.contentType);
+    const openHref = `/api/attachments/${masterDoc.id}${viewable ? '?inline=1' : ''}`;
+    const openLabel = viewable ? 'Open in new tab' : 'Download';
     return `
-      <div class="card-header" style="background:none;border:none;padding:0 0 14px;">
-        <h2>Curriculum master document</h2>
-        <span class="small muted">The single source of truth — everyone with access can view or download it</span>
-      </div>
-      <div class="card card-pad" style="max-width:640px;">
-        ${masterDoc ? `
-          <div class="attachment-row" style="margin-bottom:10px;">${attachmentChipSaved({ id: masterDoc.id, name: masterDoc.filename })}</div>
-          <p class="small muted">Uploaded by ${esc(masterDoc.uploadedBy || 'Unknown')} · ${fmtDateTime(masterDoc.uploadedAt)}</p>
-        ` : `<p class="muted">No master document has been uploaded yet.</p>`}
-        ${isAdmin ? `
-          <form id="master-form" style="margin-top:${masterDoc?'20px':'6px'};">
-            <div class="field">
-              <label>${masterDoc ? 'Upload a new version (replaces the current file)' : 'Upload the master document'}</label>
-              <div class="file-drop"><input type="file" id="mf-file" required></div>
-            </div>
-            <div style="display:flex; gap:10px; margin-top:6px;">
-              <button type="submit" class="btn btn-secondary btn-md">${masterDoc ? 'Upload new version' : 'Upload'}</button>
-              ${masterDoc ? `<button type="button" class="btn btn-outline btn-md" id="master-remove-btn">Remove</button>` : ''}
-            </div>
-          </form>
-        ` : ''}
+      <div class="master-doc-shell" style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; flex-shrink:0;">
+          <div style="min-width:0;">
+            <div style="font-weight:var(--fw-bold); font-size:1.05rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(masterDoc.filename)}</div>
+            <div class="small muted">Uploaded by ${esc(masterDoc.uploadedBy || 'Unknown')} · ${fmtDateTime(masterDoc.uploadedAt)}</div>
+          </div>
+          <div style="display:flex; gap:8px; flex-shrink:0;">
+            <a class="btn btn-outline btn-sm" href="${openHref}" target="_blank" rel="noopener">${ICONS.externalLink}${openLabel}</a>
+            ${isAdmin ? `<button type="button" class="btn btn-outline btn-sm" id="master-toggle-upload">${showMasterUpload ? 'Cancel' : 'Replace'}</button>` : ''}
+          </div>
+        </div>
+        ${isAdmin && showMasterUpload ? `<div class="card card-pad" style="flex-shrink:0;">${masterUploadFormHTML(true)}</div>` : ''}
+        <div class="card" style="flex:1; min-height:0; overflow:hidden; padding:0;">
+          ${masterViewerHTML(masterDoc)}
+        </div>
       </div>
     `;
   }
   function wireMasterDoc(){
+    const toggleBtn = document.getElementById('master-toggle-upload');
+    if(toggleBtn) toggleBtn.addEventListener('click', () => { showMasterUpload = !showMasterUpload; rerender('master'); });
     const form = document.getElementById('master-form');
     if(form) form.addEventListener('submit', async e => {
       e.preventDefault();
@@ -545,6 +590,7 @@
       try{
         const { document: doc } = await apiForm('POST', '/api/master', fd);
         masterDoc = doc;
+        showMasterUpload = false;
         toast('Master document updated.');
         rerender('master');
       }catch(err){ errorToast(err, "Couldn't upload that file."); }
@@ -555,6 +601,7 @@
       try{
         await apiJSON('DELETE', '/api/master');
         masterDoc = null;
+        showMasterUpload = false;
         toast('Master document removed.');
         rerender('master');
       }catch(err){ errorToast(err); }

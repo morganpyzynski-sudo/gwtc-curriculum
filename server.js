@@ -235,12 +235,18 @@ app.delete('/api/curriculum/:id/attachments/:attId', requireTier(TIER.ADMIN), as
 });
 
 // ================= ATTACHMENTS (stream bytes) =================
+// Inline viewing (?inline=1) is only honored for a safe allowlist of content types, regardless of
+// what the caller requests — everything else is always served as a forced download, to avoid ever
+// rendering an uploaded file (e.g. one mislabeled or spoofed as text/html) inside our own origin.
+const INLINE_SAFE_TYPES = [/^image\//, /^text\/plain$/, /^application\/pdf$/];
 app.get('/api/attachments/:id', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT filename, content_type, data FROM attachments WHERE id = $1', [req.params.id]);
   const a = rows[0];
   if (!a) return res.status(404).end();
+  const canInline = INLINE_SAFE_TYPES.some(rx => rx.test(a.content_type || ''));
+  const disposition = (req.query.inline && canInline) ? 'inline' : 'attachment';
   res.setHeader('Content-Type', a.content_type || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${a.filename.replace(/"/g, '')}"`);
+  res.setHeader('Content-Disposition', `${disposition}; filename="${a.filename.replace(/"/g, '')}"`);
   res.send(a.data);
 });
 
